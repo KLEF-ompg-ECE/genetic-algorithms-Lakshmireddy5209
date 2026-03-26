@@ -1,188 +1,294 @@
 """
-Autograding Tests — Assignment 2: GA Knapsack (2 experiments)
-=============================================================
-Section A — Code runs correctly         (25 pts)
-Section B — Plot files exist            (25 pts)
-Section C — README observations filled  (35 pts)
-Section D — Code was modified           (15 pts)
-                                  TOTAL  100 pts
+ga_knapsack.py  —  Genetic Algorithm: 0/1 Knapsack Problem
+===========================================================
+This program is COMPLETE and works as-is. DO NOT rewrite it.
+
+Your task:
+  1. Read the code and understand how it works
+  2. Run the 2 experiments described in README.md
+  3. Save the plots and fill in your observations in README.md
+
+HOW TO RUN
+----------
+    python ga_knapsack.py
+
+PROBLEM
+-------
+A trekker is packing a 15 kg backpack. There are 15 items to choose from,
+each with a weight and a value score. Pick items that maximise total value
+without exceeding the weight limit.
 """
 
-import subprocess, sys, os, re
-import pytest
+import random
+import matplotlib.pyplot as plt
+import os
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# =============================================================================
+# PROBLEM DATA
+# =============================================================================
+
+ITEMS = [
+    # (name,                weight_kg,  value)
+    ("Water bottle",          2.0,   9),
+    ("First aid kit",         1.5,  10),
+    ("Tent",                  4.0,  10),
+    ("Sleeping bag",          3.0,   9),
+    ("Torch",                 0.5,   6),
+    ("Energy bars (x6)",      1.0,   7),
+    ("Rain jacket",           1.0,   8),
+    ("Map & compass",         0.3,   7),
+    ("Camera",                1.2,   5),
+    ("Extra clothes",         2.0,   4),
+    ("Cooking stove",         1.5,   6),
+    ("Rope (10 m)",           2.5,   5),
+    ("Sunscreen",             0.3,   4),
+    ("Trekking poles",        1.5,   5),
+    ("Power bank",            0.8,   6),
+]
+
+NUM_ITEMS  = len(ITEMS)
+MAX_WEIGHT = 15.0   # kg
+
+WEIGHTS = [item[1] for item in ITEMS]
+VALUES  = [item[2] for item in ITEMS]
+NAMES   = [item[0] for item in ITEMS]
 
 
 # =============================================================================
-# SECTION A — Code runs correctly  (25 pts)
+# FITNESS FUNCTION
 # =============================================================================
 
-class TestCodeRuns:
+def fitness(chromosome):
+    """
+    Score a knapsack solution. Higher = better.
 
-    def _run(self):
-        return subprocess.run(
-            [sys.executable, "ga_knapsack.py"],
-            cwd=ROOT, capture_output=True, text=True, timeout=120
-        )
+    If total weight exceeds MAX_WEIGHT -> score = 0 (invalid solution).
+    Otherwise -> score = total value packed.
 
-    def test_runs_without_error(self):
-        r = self._run()
-        assert r.returncode == 0, \
-            f"Program crashed (exit {r.returncode}):\n{r.stderr[:400]}"
-
-    def test_output_shows_value(self):
-        r = self._run()
-        assert "Value" in r.stdout, \
-            "'Value' not found in output — is print_solution() called?"
-
-    def test_output_shows_weight(self):
-        r = self._run()
-        assert "Weight" in r.stdout, \
-            "'Weight' not found in output — is print_solution() called?"
-
-    def test_output_shows_generations(self):
-        r = self._run()
-        assert "eneration" in r.stdout, \
-            "Generation count not printed"
-
-    def test_multiple_experiment_runs(self):
-        r = self._run()
-        count = r.stdout.count("Final best value")
-        assert count >= 2, \
-            f"Expected >=2 runs in output (Exp1 + at least one Exp2), found {count}"
+    Args:
+        chromosome : binary list of length NUM_ITEMS
+                     1 = pack this item,  0 = leave it behind
+    """
+    total_weight = sum(WEIGHTS[i] for i in range(NUM_ITEMS) if chromosome[i] == 1)
+    total_value  = sum(VALUES[i]  for i in range(NUM_ITEMS) if chromosome[i] == 1)
+    if total_weight > MAX_WEIGHT:
+        return 0
+    return total_value
 
 
 # =============================================================================
-# SECTION B — Plot files exist  (25 pts)
+# GA OPERATORS
 # =============================================================================
 
-class TestPlotsExist:
+def tournament_select(population, fitnesses, k=3):
+    """Pick the best individual from k random candidates."""
+    candidates = random.sample(range(len(population)), k)
+    winner     = max(candidates, key=lambda i: fitnesses[i])
+    return population[winner][:]
 
-    def _plot(self, fname):
-        return os.path.join(ROOT, "plots", fname)
 
-    def test_plots_directory_exists(self):
-        assert os.path.isdir(os.path.join(ROOT, "plots")), \
-            "plots/ directory not found"
+def crossover(p1, p2, rate=0.8):
+    """Single-point crossover: combine two parents at a random cut point."""
+    if random.random() > rate:
+        return p1[:]
+    cut = random.randint(1, NUM_ITEMS - 1)
+    return p1[:cut] + p2[cut:]
 
-    def test_experiment_1_exists(self):
-        assert os.path.isfile(self._plot("experiment_1.png")), \
-            "plots/experiment_1.png missing"
 
-    def test_experiment_2a_exists(self):
-        assert os.path.isfile(self._plot("experiment_2a.png")), \
-            "plots/experiment_2a.png missing (mutation_rate=0.01)"
+def mutate(chromosome, rate):
+    """
+    Bit-flip mutation: each gene flips (0->1 or 1->0) with probability rate.
 
-    def test_experiment_2b_exists(self):
-        assert os.path.isfile(self._plot("experiment_2b.png")), \
-            "plots/experiment_2b.png missing (mutation_rate=0.05)"
-
-    def test_experiment_2c_exists(self):
-        assert os.path.isfile(self._plot("experiment_2c.png")), \
-            "plots/experiment_2c.png missing (mutation_rate=0.30)"
-
-    def test_all_plots_non_empty(self):
-        plots_dir = os.path.join(ROOT, "plots")
-        if not os.path.isdir(plots_dir):
-            pytest.skip("plots/ directory missing")
-        for fname in ["experiment_1.png", "experiment_2a.png",
-                      "experiment_2b.png", "experiment_2c.png"]:
-            path = os.path.join(plots_dir, fname)
-            if os.path.isfile(path):
-                assert os.path.getsize(path) > 1000, \
-                    f"{fname} appears empty"
+    EXPERIMENT 2: this rate is controlled by mutation_rate in run_ga()
+    Try: 0.01  (very rare flips  - low diversity)
+         0.05  (default          - balanced)
+         0.30  (frequent flips   - too chaotic)
+    """
+    result = chromosome[:]
+    for i in range(NUM_ITEMS):
+        if random.random() < rate:
+            result[i] = 1 - result[i]
+    return result
 
 
 # =============================================================================
-# SECTION C — README observations filled in  (35 pts)
+# GENETIC ALGORITHM
 # =============================================================================
 
-class TestREADME:
+def run_ga(
+    population_size = 20,
+    generations     = 50,
+    crossover_rate  = 0.8,
+    mutation_rate   = 0.05,   # <- EXPERIMENT 2: change this value
+    tournament_size = 3,
+    seed            = 42,
+):
+    """
+    Run the Genetic Algorithm to maximise knapsack value.
+    KEY PARAMETER
+    -------------
+    mutation_rate : probability of flipping each bit each generation
+                    too low  (0.01) -> population loses diversity, gets stuck
+                    balanced (0.05) -> good exploration and exploitation
+                    too high (0.30) -> too random, destroys good solutions
 
-    PLACEHOLDERS = ["YOUR ANSWER", "YOUR OBSERVATION", "YOUR REFLECTION", "PASTE"]
+    Returns
+    -------
+    best_chromosome : binary list
+    best_value      : int
+    value_log       : list of best value per generation (for plotting)
+    """
+    random.seed(seed)
 
-    def _load(self):
-        path = os.path.join(ROOT, "README.md")
-        assert os.path.isfile(path), "README.md not found"
-        return open(path).read()
+    population = [
+        [random.randint(0, 1) for _ in range(NUM_ITEMS)]
+        for _ in range(population_size)
+    ]
 
-    def _filled(self, text, marker):
-        m = re.search(
-            rf"{re.escape(marker)}.*?```\n(.*?)```", text, re.DOTALL)
-        if not m:
-            return False
-        content = m.group(1).strip()
-        return bool(content) and not any(p in content for p in self.PLACEHOLDERS)
+    best_chromosome = None
+    best_value      = -1
+    value_log       = []
 
-    def test_student_name_filled(self):
-        text = self._load()
-        line = text.split("Student Name")[1].split("\n")[0]
-        assert "___" not in line, "Student name is still blank"
+    for _ in range(generations):
+        fitnesses = [fitness(c) for c in population]
 
-    def test_q1_answered(self):
-        assert self._filled(self._load(), "Q1."), \
-            "Q1 still placeholder"
+        gen_best_i = max(range(population_size), key=lambda i: fitnesses[i])
+        if fitnesses[gen_best_i] > best_value:
+            best_value      = fitnesses[gen_best_i]
+            best_chromosome = population[gen_best_i][:]
 
-    def test_q2_answered(self):
-        assert self._filled(self._load(), "Q2."), \
-            "Q2 still placeholder"
+        value_log.append(best_value)
 
-    def test_q3_answered(self):
-        assert self._filled(self._load(), "Q3."), \
-            "Q3 still placeholder"
+        # Elitism: always keep the best
+        next_gen = [best_chromosome[:]]
+        while len(next_gen) < population_size:
+            p1    = tournament_select(population, fitnesses, tournament_size)
+            p2    = tournament_select(population, fitnesses, tournament_size)
+            child = crossover(p1, p2, crossover_rate)
+            child = mutate(child, mutation_rate)
+            next_gen.append(child)
 
-    def test_exp1_packing_list_pasted(self):
-        assert self._filled(self._load(), "Copy the printed packing list"), \
-            "Experiment 1 packing list not pasted"
+        population = next_gen
 
-    def test_exp1_observation_written(self):
-        assert self._filled(self._load(), "Look at `plots/experiment_1.png`"), \
-            "Experiment 1 plot observation still blank"
-
-    def test_exp2_results_table_filled(self):
-        text = self._load()
-        section = text[text.find("Experiment 2"):text.find("## Summary")]
-        rows = [l for l in section.split("\n") if l.startswith("| 0.")]
-        filled = [r for r in rows
-                  if r.count("|") >= 4 and
-                  any(c.strip() not in ("", "Yes", "No", " ")
-                      for c in r.split("|")[2:5])]
-        assert len(filled) >= 2, \
-            f"Experiment 2 table: only {len(filled)} rows have data (need >= 2)"
-
-    def test_exp2_observation_written(self):
-        assert self._filled(self._load(), "Compare the three plots"), \
-            "Experiment 2 observation still blank"
-
-    def test_exp2_best_rate_answered(self):
-        assert self._filled(self._load(), "Which mutation_rate gave the best result"), \
-            "Experiment 2 best rate question not answered"
-
-    def test_reflection_written(self):
-        assert self._filled(self._load(), "most important thing you learned about Genetic"), \
-            "Summary reflection still blank"
+    return best_chromosome, best_value, value_log
 
 
 # =============================================================================
-# SECTION D — Code was modified  (15 pts)
+# OUTPUT HELPERS
 # =============================================================================
 
-class TestCodeModified:
+def print_solution(chromosome):
+    total_weight = sum(WEIGHTS[i] for i in range(NUM_ITEMS) if chromosome[i] == 1)
+    total_value  = sum(VALUES[i]  for i in range(NUM_ITEMS) if chromosome[i] == 1)
+    packed = [NAMES[i] for i in range(NUM_ITEMS) if chromosome[i] == 1]
+    valid  = total_weight <= MAX_WEIGHT
+    print("\n  Best Packing List")
+    print("-" * 38)
+    for item in packed:
+        print(f"  + {item}")
+    print("-" * 38)
+    print(f"  Weight : {total_weight:.1f} / {MAX_WEIGHT} kg")
+    print(f"  Value  : {total_value}")
+    print(f"  Valid  : {'Yes' if valid else 'No - Over limit!'}\n")
 
-    def _load(self):
-        return open(os.path.join(ROOT, "ga_knapsack.py")).read()
 
-    def test_exp2_rate_001_present(self):
-        assert "0.01" in self._load(), \
-            "mutation_rate=0.01 not found in code"
+def save_plot(value_log, filename, title):
+    os.makedirs("plots", exist_ok=True)
+    plt.figure(figsize=(9, 4))
+    plt.plot(value_log, color="seagreen", linewidth=2, marker="o", markersize=3)
+    plt.xlabel("Generation")
+    plt.ylabel("Best Value")
+    plt.title(f"GA Convergence - {title}")
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(filename, dpi=150)
+    plt.close()
+    print(f"  Saved -> {filename}")
 
-    def test_exp2_rate_030_present(self):
-        code = self._load()
-        assert "0.30" in code or "0.3," in code, \
-            "mutation_rate=0.30 not found in code"
 
-    def test_exp2_three_plot_saves(self):
-        count = self._load().count("experiment_2")
-        assert count >= 3, \
-            f"Expected 3 experiment_2 plot saves, found {count}"
+# =============================================================================
+# RUN YOUR EXPERIMENTS HERE
+# =============================================================================
+
+if __name__ == "__main__":
+
+    # ==========================================================================
+    # EXPERIMENT 1 - Baseline
+    # Run as-is. Do NOT change any parameters here.
+    # ==========================================================================
+    print("=" * 48)
+    print("  EXPERIMENT 1 - Baseline")
+    print("=" * 48)
+
+    best_chr, best_val, val_log = run_ga(
+        population_size=20, generations=50,
+        crossover_rate=0.8, mutation_rate=0.05,
+        tournament_size=3, seed=42
+    )
+    print_solution(best_chr)
+    print(f"  Generations run : {len(val_log)}")
+    print(f"  Value at gen 1  : {val_log[0]}")
+    print(f"  Final best value: {best_val}")
+    save_plot(val_log, "plots/experiment_1.png",
+              "Baseline  mutation_rate=0.05")
+    # ==========================================================================
+    # EXPERIMENT 2 - Effect of Mutation Rate
+    # TODO: Copy this block THREE times below (for 0.01, 0.05, and 0.30).
+    #       Change mutation_rate and the plot filename each time.
+    #       Record results in README.md.
+    # ==========================================================================
+
+    # # ======================================================================
+# EXPERIMENT 2a - mutation_rate = 0.01
+# ======================================================================
+print("=" * 48)
+print("  EXPERIMENT 2a - mutation_rate = 0.01")
+print("=" * 48)
+
+chr2, val2, vl2 = run_ga(
+    population_size=20, generations=50,
+    crossover_rate=0.8, mutation_rate=0.01,
+    tournament_size=3, seed=42
+)
+
+print_solution(chr2)
+print(f"  Final best value: {val2}")
+save_plot(vl2, "plots/experiment_2a.png", "mutation_rate=0.01")
+
+
+# ======================================================================
+# EXPERIMENT 2b - mutation_rate = 0.05
+# ======================================================================
+print("=" * 48)
+print("  EXPERIMENT 2b - mutation_rate = 0.05")
+print("=" * 48)
+
+chr3, val3, vl3 = run_ga(
+    population_size=20, generations=50,
+    crossover_rate=0.8, mutation_rate=0.05,
+    tournament_size=3, seed=42
+)
+
+print_solution(chr3)
+print(f"  Final best value: {val3}")
+save_plot(vl3, "plots/experiment_2b.png", "mutation_rate=0.05")
+
+
+# ======================================================================
+# EXPERIMENT 2c - mutation_rate = 0.30
+# ======================================================================
+print("=" * 48)
+print("  EXPERIMENT 2c - mutation_rate = 0.30")
+print("=" * 48)
+
+chr4, val4, vl4 = run_ga(
+    population_size=20, generations=50,
+    crossover_rate=0.8, mutation_rate=0.30,
+    tournament_size=3, seed=42
+)
+
+print_solution(chr4)
+print(f"  Final best value: {val4}")
+save_plot(vl4, "plots/experiment_2c.png", "mutation_rate=0.30")
+
+    #
